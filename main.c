@@ -34,20 +34,24 @@ struct {
 
 struct {
     HANDLE thread;
-    POINT cursor;
-    RECT desktop;
     DWORD timeout;
+    UINT prevScreenSaver;
+    EXECUTION_STATE prevExecState;
 } Worker;
 
 UINT WM_TASKBARCREATED = 0;
 
 DWORD WINAPI WorkerThread(LPVOID lpParam)
 {
+    INPUT input;
     DWORD tick = 0;
     WCHAR buf[BUFSIZ];
 
-    GetWindowRect(GetDesktopWindow(), &Worker.desktop);
-    srand((unsigned) GetTickCount());
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_MOVE;
+    input.mi.mouseData = 0;
+    input.mi.dx = 1;
+    input.mi.dy = 0;
 
     while (Worker.timeout) {
         wsprintf(buf, L"%02d:%02d:%02d", tick / 3600, (tick / 60) % 60, tick % 60);
@@ -59,9 +63,10 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
         }
 
         if (tick++ % Worker.timeout == 0) {
-            Worker.cursor.x = (LONG) ((DOUBLE) rand() / RAND_MAX * Worker.desktop.right);
-            Worker.cursor.y = (LONG) ((DOUBLE) rand() / RAND_MAX * Worker.desktop.bottom);
-            SetCursorPos(Worker.cursor.x, Worker.cursor.y);
+            SendInput(1, &input, sizeof(input));
+
+            input.mi.dx = -input.mi.dx;
+            SendInput(1, &input, sizeof(input));
         }
 
         Sleep(1000);
@@ -72,6 +77,10 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
 
 INT WorkerStart()
 {
+    Worker.prevExecState = SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
+    SystemParametersInfo(SPI_GETSCREENSAVETIMEOUT, 0, &Worker.prevScreenSaver, 0);
+    SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, FALSE, NULL, 0);
+
     Worker.thread = CreateThread(NULL, 0, WorkerThread, NULL, 0, NULL);
 
     return 0;
@@ -79,6 +88,9 @@ INT WorkerStart()
 
 INT WorkerStop()
 {
+    SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, Worker.prevScreenSaver, NULL, 0);
+    SetThreadExecutionState(Worker.prevExecState);
+
     return TerminateThread(Worker.thread, 0);
 }
 
