@@ -50,7 +50,6 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = MOUSEEVENTF_MOVE;
     input.mi.mouseData = 0;
-    input.mi.dx = 1;
     input.mi.dy = 0;
 
     while (Worker.timeout) {
@@ -63,9 +62,10 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
         }
 
         if (tick++ % Worker.timeout == 0) {
+            input.mi.dx = 1;
             SendInput(1, &input, sizeof(input));
 
-            input.mi.dx = -input.mi.dx;
+            input.mi.dx = -1;
             SendInput(1, &input, sizeof(input));
         }
 
