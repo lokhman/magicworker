@@ -187,7 +187,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 PNOTIFYICONDATA WorkerNotifyIconData(HINSTANCE hInstance, HWND hWnd)
 {
     PNOTIFYICONDATA notifyIconData;
-    size_t size = sizeof(NOTIFYICONDATA);
+    DWORD size = sizeof(NOTIFYICONDATA);
 
     notifyIconData = (PNOTIFYICONDATA) HeapAlloc(GetProcessHeap(), 0, size);
     if (notifyIconData == NULL)
@@ -269,5 +269,5 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     HeapFree(GetProcessHeap(), 0, App.notifyIconData);
 
-    return msg.wParam;
+    return (INT) msg.wParam;
 }
