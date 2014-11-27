@@ -13,11 +13,13 @@
 
 #pragma comment(lib, "ComCtl32.lib")
 
-#define BUFSIZ 255U
-#define ID_TRAY_APP_ICON 5000
-#define WM_TRAYICON (WM_USER + 1)
-#define MUTEX_NAME L"MagicWorkerMutex"
-#define DEF_TIMEOUT L"30"
+#define BUFSIZ       255U
+#define KEY_TIME     1000
+#define DEF_TIMEOUT  L"30"
+#define MUTEX_NAME   L"MagicWorkerMutex"
+
+#define WM_TRAYICON  (WM_USER + 1)
+#define WM_INVISIBLE (WM_TRAYICON + 1)
 
 struct {
     PNOTIFYICONDATA notifyIconData;
@@ -29,14 +31,18 @@ struct {
         WCHAR err[BUFSIZ];
         WCHAR errWinCreat[BUFSIZ];
         WCHAR errNoMem[BUFSIZ];
+
+        WCHAR cfgInvisible[BUFSIZ];
     } Strings;
 } App;
 
 struct {
-    HANDLE thread;
-    DWORD timeout;
+    HANDLE hThread;
+    DWORD dwTimeout;
+    DWORD dwKeyTime;
     UINT prevScreenSaver;
     EXECUTION_STATE prevExecState;
+    BOOL isInvisible;
 } Worker;
 
 UINT WM_TASKBARCREATED = 0;
@@ -52,7 +58,7 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
     input.mi.mouseData = 0;
     input.mi.dy = 0;
 
-    while (Worker.timeout) {
+    while (Worker.dwTimeout) {
         wsprintf(buf, L"%02d:%02d:%02d", tick / 3600, (tick / 60) % 60, tick % 60);
         SetDlgItemText(App.notifyIconData->hWnd, IDC_TIME, buf);
 
@@ -61,7 +67,7 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
             Shell_NotifyIcon(NIM_MODIFY, App.notifyIconData);
         }
 
-        if (tick++ % Worker.timeout == 0) {
+        if (tick++ % Worker.dwTimeout == 0) {
             input.mi.dx = 1;
             SendInput(1, &input, sizeof(input));
 
@@ -75,15 +81,13 @@ DWORD WINAPI WorkerThread(LPVOID lpParam)
     return 0;
 }
 
-INT WorkerStart()
+HANDLE WorkerStart()
 {
     Worker.prevExecState = SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
     SystemParametersInfo(SPI_GETSCREENSAVETIMEOUT, 0, &Worker.prevScreenSaver, 0);
     SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, FALSE, NULL, 0);
 
-    Worker.thread = CreateThread(NULL, 0, WorkerThread, NULL, 0, NULL);
-
-    return 0;
+    return (Worker.hThread = CreateThread(NULL, 0, WorkerThread, NULL, 0, NULL));
 }
 
 INT WorkerStop()
@@ -91,31 +95,41 @@ INT WorkerStop()
     SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, Worker.prevScreenSaver, NULL, 0);
     SetThreadExecutionState(Worker.prevExecState);
 
-    return TerminateThread(Worker.thread, 0);
+    return TerminateThread(Worker.hThread, 0);
 }
 
 VOID WorkerMinimize()
 {
-    Shell_NotifyIcon(NIM_ADD, App.notifyIconData);
+    if (!Worker.isInvisible) {
+        Shell_NotifyIcon(NIM_ADD, App.notifyIconData);
+    }
+
     ShowWindow(App.notifyIconData->hWnd, SW_HIDE);
 }
 
 VOID WorkerRestore()
 {
-    Shell_NotifyIcon(NIM_DELETE, App.notifyIconData);
+    if (!Worker.isInvisible) {
+        Shell_NotifyIcon(NIM_DELETE, App.notifyIconData);
+    }
+
     ShowWindow(App.notifyIconData->hWnd, SW_SHOW);
 }
 
 LRESULT CALLBACK LowLevelKeyboardProc(INT nCode, WPARAM wParam, LPARAM lParam)
 {
-    KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *) lParam;
+    KBDLLHOOKSTRUCT *pKbd = (KBDLLHOOKSTRUCT *) lParam;
 
     switch (wParam) {
     case WM_KEYUP:
-        if (pKeyBoard->vkCode == VK_ESCAPE) {
-            WorkerStop();
-            WorkerRestore();
-            break;
+        if (pKbd->vkCode == VK_ESCAPE) {
+            if (pKbd->time - Worker.dwKeyTime < KEY_TIME) {
+                WorkerStop();
+                WorkerRestore();
+                break;
+            }
+
+            Worker.dwKeyTime = pKbd->time;
         }
     default:
         return CallNextHookEx(NULL, nCode, wParam, lParam);
@@ -128,9 +142,9 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HINSTANCE hInstance = GetModuleHandle(NULL);
     HWND hButton = GetDlgItem(hDlg, IDC_START);
+    HMENU hMenu = GetSystemMenu(hDlg, FALSE);
+    HICON hBigIcon, hSmallIcon;
     WCHAR buf[BUFSIZ];
-
-    HICON hIcon;
 
     if (msg == WM_TASKBARCREATED && !IsWindowVisible(hDlg)) {
         WorkerMinimize();
@@ -148,7 +162,18 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
         case IDC_TIMEOUT:
             if (HIWORD(wParam) == EN_CHANGE) {
                 GetDlgItemText(hDlg, IDC_TIMEOUT, buf, BUFSIZ);
-                EnableWindow(hButton, (Worker.timeout = _wtoi(buf)) > 0);
+                EnableWindow(hButton, (Worker.dwTimeout = _wtoi(buf)) > 0);
+            }
+        }
+        break;
+
+    case WM_SYSCOMMAND:
+        switch(LOWORD(wParam)) {
+        case WM_INVISIBLE:
+            if (Worker.isInvisible = !(GetMenuState(hMenu, WM_INVISIBLE, MF_BYCOMMAND) & MF_CHECKED)) {
+                CheckMenuItem(hMenu, WM_INVISIBLE, MF_BYCOMMAND | MF_CHECKED);
+            } else {
+                CheckMenuItem(hMenu, WM_INVISIBLE, MF_BYCOMMAND | MF_UNCHECKED);
             }
         }
         break;
@@ -156,11 +181,21 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_INITDIALOG:
         SetWindowText(hDlg, App.Strings.appName);
 
-        hIcon = (HICON) LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON), IMAGE_ICON, 64, 64, 0);
-        SendDlgItemMessage(hDlg, IDC_START, BM_SETIMAGE, IMAGE_ICON, (LPARAM) hIcon);
+        hSmallIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
+        SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM) hSmallIcon);
+
+        hBigIcon = (HICON) LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON), IMAGE_ICON, 64, 64, 0);
+        SendDlgItemMessage(hDlg, IDC_START, BM_SETIMAGE, IMAGE_ICON, (LPARAM) hBigIcon);
 
         SendDlgItemMessage(hDlg, IDC_TIMEOUT, EM_LIMITTEXT, 5, 0);
         SetDlgItemText(hDlg, IDC_TIMEOUT, DEF_TIMEOUT);
+
+        DeleteMenu(hMenu, SC_MAXIMIZE, MF_BYCOMMAND);
+        DeleteMenu(hMenu, SC_RESTORE, MF_BYCOMMAND);
+        DeleteMenu(hMenu, SC_SIZE, MF_BYCOMMAND);
+
+        InsertMenu(hMenu, 0, MF_BYPOSITION | MF_STRING | MF_CHECKED, WM_INVISIBLE, App.Strings.cfgInvisible);
+        InsertMenu(hMenu, 1, MF_BYPOSITION | MF_SEPARATOR, 0, 0);
 
         return TRUE;
 
@@ -179,6 +214,7 @@ INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
             WorkerStop();
             WorkerRestore();
         }
+        return FALSE;
     }
 
     return FALSE;
@@ -197,7 +233,6 @@ PNOTIFYICONDATA WorkerNotifyIconData(HINSTANCE hInstance, HWND hWnd)
 
     notifyIconData->cbSize = size;
     notifyIconData->hWnd = hWnd;
-    notifyIconData->uID = ID_TRAY_APP_ICON;
     notifyIconData->uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_INFO;
     notifyIconData->dwInfoFlags = NIIF_INFO;
     notifyIconData->uCallbackMessage = WM_TRAYICON;
@@ -218,6 +253,8 @@ VOID WorkerLoadResources(HINSTANCE hInstance)
     LoadString(hInstance, IDS_ERR, App.Strings.err, BUFSIZ);
     LoadString(hInstance, IDS_ERR_WINCREAT, App.Strings.errWinCreat, BUFSIZ);
     LoadString(hInstance, IDS_ERR_NOMEM, App.Strings.errNoMem, BUFSIZ);
+
+    LoadString(hInstance, IDS_CFG_INVISIBLE, App.Strings.cfgInvisible, BUFSIZ);
 }
 
 VOID WorkerError(LPCWSTR msg)
@@ -241,7 +278,10 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     InitCommonControls();
     WorkerLoadResources(hInstance);
 
-    WM_TASKBARCREATED = RegisterWindowMessageA("TaskbarCreated") ;
+    Worker.dwKeyTime = 0;
+    Worker.isInvisible = TRUE;
+
+    WM_TASKBARCREATED = RegisterWindowMessageA("TaskbarCreated");
 
     if ((hDlg = CreateDialogParam(hInstance, MAKEINTRESOURCE(IDD_MAIN), 0, DlgProc, 0)) == NULL) {
         WorkerError(App.Strings.errWinCreat);
