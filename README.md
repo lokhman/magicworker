@@ -21,7 +21,7 @@ online and active when you are working or are away from the computer.
 
 Usage hints:
 - To run in invisible mode check corresponding setting in window menu.
-- To stop the worker press ESC key shortly at least two times.
+- To stop the worker press Shift+ESC key shortly at least two times.
 
 Magic Worker is available under the MIT license. The included LICENSE
 file describes this in detail.
