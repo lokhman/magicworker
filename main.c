@@ -43,7 +43,7 @@ struct {
     UINT prevScreenSaver;
     EXECUTION_STATE prevExecState;
     BOOL isInvisible;
-	BOOL isShiftDown;
+    BOOL isShiftDown;
 } Worker;
 
 UINT WM_TASKBARCREATED = 0;
@@ -122,26 +122,25 @@ LRESULT CALLBACK LowLevelKeyboardProc(INT nCode, WPARAM wParam, LPARAM lParam)
     KBDLLHOOKSTRUCT *pKbd = (KBDLLHOOKSTRUCT *) lParam;
 
     switch (wParam) {
-	case WM_KEYDOWN:
-		if (pKbd->vkCode == VK_LSHIFT) {
-			Worker.isShiftDown = TRUE;
-		}
-		break;
+    case WM_KEYDOWN:
+        if (pKbd->vkCode == VK_LSHIFT) {
+            Worker.isShiftDown = TRUE;
+        }
+        break;
     case WM_KEYUP:
-		if (pKbd->vkCode == VK_LSHIFT) {
-			Worker.isShiftDown = FALSE;
-		} else if (Worker.isShiftDown && pKbd->vkCode == VK_ESCAPE) {
+        if (pKbd->vkCode == VK_LSHIFT) {
+            Worker.isShiftDown = FALSE;
+        } else if (Worker.isShiftDown && pKbd->vkCode == VK_ESCAPE) {
             if (pKbd->time - Worker.dwKeyTime < KEY_TIME) {
                 WorkerStop();
                 WorkerRestore();
-				return 0;
+                return 0;
             }
-
             Worker.dwKeyTime = pKbd->time;
         }
     }
 
-	return CallNextHookEx(NULL, nCode, wParam, lParam);
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
 INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
